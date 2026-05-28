@@ -1,0 +1,32 @@
+/* ── Design tokens (matches app.lanwealth.com) ───────────────── */
+:root {
+  --bg:      #0A0A0B;  --bg2:     #111113;
+  --bg3:     #18181C;  --bg4:     #1E1E24;
+  --border:  #222228;  --border2: #2C2C35;
+  --text:    #E4E4EA;  --muted:   #606070;
+  --dim:     #38383F;
+  --teal:    #1AEBA8;  --teal2:   #0F8C63;  --teal3: #083D2B;
+  --red:     #E8453C;
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'DM Mono', 'SF Mono', monospace;
+  --titlebar: 38px;    /* space reserved for OS traffic lights on mac */
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;       /* native app feel: disable text selection by default */
+}
+/* allow text selection in messages */
+.selectable { user-select: text; }
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+::selection { background: var(--teal3); color: var(--teal); }
+button, input, select, textarea { font-family: inherit; font-size: inherit; }
+a { color: inherit; text-decoration: none; }
