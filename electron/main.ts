@@ -34,9 +34,13 @@ function createWindow() {
 
   mainWindow.on('ready-to-show', () => { mainWindow?.show() })
 
-  // Open external links in default browser, not Electron
+  // Open external links in default browser, not Electron.
+  // 只放行安全协议(https/http/mailto),拦截 file:/javascript: 等,避免恶意链接打开本地资源或执行脚本。
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    try {
+      const proto = new URL(url).protocol
+      if (proto === 'https:' || proto === 'http:' || proto === 'mailto:') shell.openExternal(url)
+    } catch { /* 非法 URL,忽略 */ }
     return { action: 'deny' }
   })
 
