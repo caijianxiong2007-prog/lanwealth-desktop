@@ -3,9 +3,11 @@ import { getSession, supabase } from './lib/supabase'
 import type { UserSession }     from './lib/supabase'
 import LoginPage                from './pages/LoginPage'
 import ChatPage                 from './pages/ChatPage'
+import KnowledgePage            from './pages/KnowledgePage'
 
 export default function App() {
   const [session, setSession] = useState<UserSession | null | undefined>(undefined)
+  const [page, setPage]       = useState<'chat' | 'knowledge'>('chat')
 
   useEffect(() => {
     getSession().then(s => setSession(s))
@@ -28,7 +30,8 @@ export default function App() {
     </div>
   )
 
-  return session
-    ? <ChatPage session={session} onSignOut={() => setSession(null)} />
-    : <LoginPage onSuccess={s => setSession(s)} />
+  if (!session) return <LoginPage onSuccess={s => setSession(s)} />
+  return page === 'knowledge'
+    ? <KnowledgePage session={session} onBack={() => setPage('chat')} />
+    : <ChatPage session={session} onSignOut={() => setSession(null)} onOpenKnowledge={() => setPage('knowledge')} />
 }
