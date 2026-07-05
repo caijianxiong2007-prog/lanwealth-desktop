@@ -61,6 +61,7 @@
     "@supabase/supabase-js": "^2.49.0"
   },
   "devDependencies": {
+    "@electron-toolkit/tsconfig": "^2.0.0",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
