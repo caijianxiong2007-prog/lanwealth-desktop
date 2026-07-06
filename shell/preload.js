@@ -10,9 +10,12 @@ contextBridge.exposeInMainWorld('electronApp', {
   version:  process.versions.electron,
   // 知识库「仅本地」原件留底:原件只存这台电脑,云端只有检索索引
   knowledge: {
-    saveSource:   (docId, name, data) => ipcRenderer.invoke('know:save', docId, name, new Uint8Array(data)),
+    // 存原件(+可选提取全文 sidecar,供查询时读取);text 传入则本机也留全文
+    saveSource:   (docId, name, data, text) => ipcRenderer.invoke('know:save', docId, name, new Uint8Array(data), typeof text === 'string' ? text : undefined),
     listSources:  ()      => ipcRenderer.invoke('know:list'),
     readSource:   (docId) => ipcRenderer.invoke('know:read', docId),
     deleteSource: (docId) => ipcRenderer.invoke('know:delete', docId),
+    // 按关键词检索本机资料,返回匹配文件全文(桌面版聊天时作附件发云端模型)
+    query:        (keywords, opts) => ipcRenderer.invoke('know:query', keywords, opts),
   },
 })

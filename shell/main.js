@@ -159,14 +159,62 @@ const safeDocId = id => (/^[A-Za-z0-9-]{8,64}$/.test(String(id ?? '')) ? String(
 const safeFileName = name =>
   (String(name ?? 'source.bin').replace(/[/\\:*?"<>|]+/g, '_').slice(0, 160)) || 'source.bin'
 
-ipcMain.handle('know:save', (_e, docId, name, data) => {
+ipcMain.handle('know:save', (_e, docId, name, data, text) => {
   const id = safeDocId(docId)
   if (!id || !(data instanceof Uint8Array || data instanceof ArrayBuffer)) return { ok: false }
   const dir = path.join(KNOW_DIR(), id)
   fs.mkdirSync(dir, { recursive: true })
   const buf = data instanceof ArrayBuffer ? Buffer.from(data) : Buffer.from(data)
   fs.writeFileSync(path.join(dir, safeFileName(name)), buf)
+  // 提取的全文也存本机(sidecar):查询时直接读文本、免二次解析发给云端模型(Part A)。
+  if (typeof text === 'string' && text.trim()) {
+    try { fs.writeFileSync(path.join(dir, '_text.txt'), text.slice(0, 400000), 'utf8') } catch { /* 文本留底失败不影响原件 */ }
+  }
   return { ok: true }
+})
+
+// 按关键词在本机资料里检索,返回匹配文件的全文(供桌面版聊天时作附件发给云端模型)。
+// 打分:文件名命中权重高 + 全文命中次数;取前 maxDocs、合计不超 charBudget。纯本地,不出网。
+ipcMain.handle('know:query', (_e, keywords, opts) => {
+  try {
+    const dir = KNOW_DIR()
+    if (!fs.existsSync(dir)) return { docs: [], candidateCount: 0 }
+    const kws = (Array.isArray(keywords) ? keywords : [])
+      .map(k => String(k ?? '').trim().toLowerCase()).filter(k => k.length >= 2).slice(0, 6)
+    if (!kws.length) return { docs: [], candidateCount: 0 }
+    const maxDocs = Math.min(Math.max(Number(opts?.maxDocs) || 6, 1), 12)
+    const charBudget = Math.min(Math.max(Number(opts?.charBudget) || 100000, 2000), 400000)
+
+    const scored = []
+    for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!d.isDirectory() || !safeDocId(d.name)) continue
+      const sub = path.join(dir, d.name)
+      const files = fs.readdirSync(sub)
+      const origName = files.find(f => f !== '_text.txt') || ''
+      const textPath = path.join(sub, '_text.txt')
+      if (!fs.existsSync(textPath)) continue                     // 无文本 sidecar(旧版留底)→ 跳过,提示用户重传
+      let text = ''
+      try { text = fs.readFileSync(textPath, 'utf8') } catch { continue }
+      if (!text.trim()) continue
+      const nameL = origName.toLowerCase(), textL = text.toLowerCase()
+      const nameHits = kws.filter(k => nameL.includes(k)).length
+      const textHits = kws.filter(k => textL.includes(k)).length
+      if (nameHits + textHits === 0) continue
+      scored.push({ name: origName || d.name, text, score: nameHits * 1000 + textHits })
+    }
+    scored.sort((a, b) => b.score - a.score)
+    const out = []
+    let used = 0
+    for (const s of scored) {
+      if (out.length >= maxDocs) break
+      const room = charBudget - used
+      if (room <= 400) break
+      const slice = s.text.length > room ? s.text.slice(0, room) : s.text
+      out.push({ name: s.name, text: slice })
+      used += slice.length
+    }
+    return { docs: out, candidateCount: scored.length }
+  } catch { return { docs: [], candidateCount: 0 } }
 })
 
 ipcMain.handle('know:list', () => {
