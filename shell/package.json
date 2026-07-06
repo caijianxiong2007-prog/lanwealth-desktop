@@ -1,7 +1,7 @@
 {
   "name": "bayze-desktop",
   "productName": "Bayze",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Bayze (白泽) AI Chat — Desktop App",
   "main": "main.js",
   "author": "LanWealth",
