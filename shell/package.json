@@ -1,7 +1,7 @@
 {
   "name": "bayze-desktop",
   "productName": "Bayze",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Bayze (白泽) AI Chat — Desktop App",
   "main": "main.js",
   "author": "LanWealth",
@@ -55,7 +55,12 @@
     },
     "nsis": {
       "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
-      "oneClick": true,
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico"
