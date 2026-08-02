@@ -4,7 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <!-- Block all external loads; everything is bundled -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://app.lanwealth.com https://umpwmtciqxthmyzpymhu.supabase.co;" />
+  <!-- %API_CONNECT_SRC% 由 electron.vite.config.ts 的 csp-connect-src 插件在 dev/build 时替换为
+       APP_URL + BACKUP_APP_URLS + SUPABASE_URL(域名容灾:备用域也须进 CSP 白名单) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' %API_CONNECT_SRC%;" />
   <title>LanWealth AI</title>
 </head>
 <body>

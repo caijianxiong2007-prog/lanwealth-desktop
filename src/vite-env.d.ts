@@ -3,6 +3,7 @@
 // electron-vite 通过 define 注入的编译期常量(见 electron.vite.config.ts)。
 interface ImportMetaEnv {
   readonly APP_URL: string
+  readonly BACKUP_APP_URLS: string
   readonly SUPABASE_URL: string
   readonly SUPABASE_ANON_KEY: string
   readonly ELECTRON_RENDERER_URL?: string

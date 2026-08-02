@@ -1,6 +1,7 @@
 // Calls app.lanwealth.com API — uses Supabase access_token as Bearer
+// 基址走 baseUrl.ts 容灾解析(主域被墙时自动切备用域)
 
-const APP_URL = import.meta.env.APP_URL as string   // https://app.lanwealth.com
+import { apiFetch } from './baseUrl'
 
 export const MODELS = [
   { id: 'deepseek-v3',      name: 'DeepSeek V3',      tag: 'Fast',      price: '$0.27/M', group: 'DeepSeek' },
@@ -21,7 +22,7 @@ export async function* streamChat(
   model: string,
   messages: Message[],
 ): AsyncGenerator<string> {
-  const res = await fetch(`${APP_URL}/api/chat`, {
+  const res = await apiFetch('/api/chat', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
     body:    JSON.stringify({ model, messages }),

@@ -1,14 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import type { UserSession } from '../lib/supabase'
 import type { Locale }      from '../lib/i18n'
+import { apiFetch }         from '../lib/baseUrl'
 
 // ── 桌面版知识库页 ────────────────────────────────────────────────────────────
 // 与网页版共用同一套服务端 API(Bearer 鉴权):/api/extract → /api/knowledge →
 // (cloud)/api/knowledge/source 或 (local)Electron IPC 本地留底。
 // 桌面版独有:「仅本地」档 — 原件存本机 userData/knowledge-sources,索引在云端;
 // 系统提取层升级后,可从本地原件一键重新入库(同名覆盖),无需翻找原文件。
-
-const APP_URL = import.meta.env.APP_URL as string
 
 const ACCEPT = '.pdf,.doc,.docx,.pptx,.xlsx,.xls,.csv,.tsv,.txt,.md,.json,.py,.js,.ts,.html,.css'
 const MAX_DETAILS = 4
@@ -78,7 +77,7 @@ export default function KnowledgePage({ session, onBack }: Props) {
     load()
     refreshLocalSources()
     // 默认留底档跟个人设置(网页「设置」页可改);策略 local 而本机无 IPC(不应发生)则回落 cloud
-    fetch(`${APP_URL}/api/user/prefs`, { headers: auth }).then(r => r.json()).then(j => {
+    apiFetch(`/api/user/prefs`, { headers: auth }).then(r => r.json()).then(j => {
       const v = String(j?.source_retention ?? 'cloud') as Retention
       if (['cloud', 'local', 'none'].includes(v)) setRetention(v === 'local' && !hasLocalTier ? 'cloud' : v)
     }).catch(() => undefined)
@@ -87,7 +86,7 @@ export default function KnowledgePage({ session, onBack }: Props) {
 
   async function load() {
     try {
-      const r = await fetch(`${APP_URL}/api/knowledge`, { headers: auth, cache: 'no-store' })
+      const r = await apiFetch(`/api/knowledge`, { headers: auth, cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       setDocs(Array.isArray(j.docs) ? j.docs : [])
       setInOrg(Boolean(j.in_org))
@@ -108,7 +107,7 @@ export default function KnowledgePage({ session, onBack }: Props) {
     const fd = new FormData()
     fd.set('file', file)
     fd.set('name', file.name)
-    const ex = await fetch(`${APP_URL}/api/extract`, { method: 'POST', headers: auth, body: fd })
+    const ex = await apiFetch(`/api/extract`, { method: 'POST', headers: auth, body: fd })
     const exj = await ex.json().catch(() => ({}))
     if (!ex.ok || !String(exj?.text ?? '').trim()) {
       return { ok: false, detail: String(exj?.error ?? t('noText', locale)) }
@@ -116,7 +115,7 @@ export default function KnowledgePage({ session, onBack }: Props) {
 
     const body: Record<string, unknown> = { name: file.name, text: exj.text, table: exj.table, source_retention: opts.retention }
     if (inOrg && scope === 'org') { body.scope = 'org'; body.allowed_roles = myRoles }   // v1:归自己全部岗位(与网页默认一致)
-    const kr = await fetch(`${APP_URL}/api/knowledge`, {
+    const kr = await apiFetch(`/api/knowledge`, {
       method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     })
     const kj = await kr.json().catch(() => ({}))
@@ -127,7 +126,7 @@ export default function KnowledgePage({ session, onBack }: Props) {
       try {
         const sfd = new FormData()
         sfd.set('docId', String(kj.docId)); sfd.set('file', file); sfd.set('name', file.name)
-        await fetch(`${APP_URL}/api/knowledge/source`, { method: 'POST', headers: auth, body: sfd })
+        await apiFetch(`/api/knowledge/source`, { method: 'POST', headers: auth, body: sfd })
       } catch { /* best-effort */ }
     } else if (opts.retention === 'local' && hasLocalTier) {
       try { await eapi().knowledge.saveSource(String(kj.docId), file.name, await file.arrayBuffer()) } catch { /* best-effort */ }
@@ -191,7 +190,7 @@ export default function KnowledgePage({ session, onBack }: Props) {
   async function del(doc: Doc) {
     if (!window.confirm(t('delConfirm', locale))) return
     try {
-      const r = await fetch(`${APP_URL}/api/knowledge?id=${encodeURIComponent(doc.id)}`, { method: 'DELETE', headers: auth })
+      const r = await apiFetch(`/api/knowledge?id=${encodeURIComponent(doc.id)}`, { method: 'DELETE', headers: auth })
       if (r.ok) {
         setDocs(d => d.filter(x => x.id !== doc.id))
         await eapi()?.knowledge?.deleteSource(doc.id).catch(() => undefined)
