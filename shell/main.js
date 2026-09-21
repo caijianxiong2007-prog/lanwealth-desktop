@@ -120,6 +120,15 @@ function buildMenu() {
       label: 'View',
       submenu: [
         { role: 'reload' }, { role: 'forceReload' },
+        {
+          // 启动时不再无条件清缓存(见 clearCacheIfUpgraded 的说明),
+          // 这里留一个手动出口:怀疑是缓存问题时点一下。
+          label: '清空缓存并重载',
+          click: async () => {
+            try { await session.defaultSession.clearCache() } catch { /* 清不掉也照样重载 */ }
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache()
+          },
+        },
         { type: 'separator' },
         { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
         { type: 'separator' },
@@ -137,9 +146,46 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+// ── 磁盘缓存:只在 App 版本变了才清,不再每次启动都清 ──────────────────────
+//
+// 原来这里是无条件 `await session.defaultSession.clearCache()`,注释说是"让生产更新
+// 立刻生效"。2026-09-21 实测,这个理由不成立、代价却很大:
+//
+//  · 理由不成立:`app.lanwealth.com` 的静态资源 URL 自带内容哈希
+//    (`/_next/static/chunks/<hash>.js`),`cache-control: public,max-age=31536000,immutable` ——
+//    发了新版就是新文件名,旧缓存根本不会被命中;而 HTML 本身是
+//    `cache-control: public, max-age=0, must-revalidate`,每次都回源校验。
+//    换句话说:不清缓存,更新一样立刻生效。
+//  · 代价很大:首页一轮就是 18 个静态文件、约 1.0 MB。大陆裸线实测(en0、不走代理、
+//    5 次取样)这 1 MB 要 **18~74 秒**,而且抖得厉害 —— 顺序拉 17.7/49.9/73.9 秒,
+//    并行 6 路 40.3/22.8 秒,快慢跟并发方式无关,就是链路本身不稳。
+//    同样的请求数打境内 CDN 是 0.4 秒,走隧道是 2.9 秒。
+//    Vercel 给大陆的边缘节点是 **sin1(新加坡)**,不是香港;HTML 本身是
+//    `x-vercel-cache: HIT`,所以这些时间全是网络往返,不是服务端算得慢。
+//    ——于是"每次启动清缓存"= 每次开 App 都在大陆的网络上重下 1 MB,老板收到的反馈
+//    「桌面版的操作页面下载非常缓慢」就是这个。
+//
+// 现在改为:只有当打包版本号和上次运行时不同,才清一次。
+// 另外 View 菜单里加了「清空缓存并重载」,需要手动兜底时用。
+const CACHE_STAMP = () => path.join(app.getPath('userData'), '.cache-version')
+
+async function clearCacheIfUpgraded() {
+  const cur = app.getVersion()
+  let prev = null
+  try { prev = fs.readFileSync(CACHE_STAMP(), 'utf8').trim() } catch { /* 首次运行,没有戳 */ }
+  if (prev === cur) return false
+  try {
+    await session.defaultSession.clearCache()
+  } catch (e) {
+    // 清缓存失败不该拦住启动 —— 最坏情况只是沿用旧缓存
+    console.warn('[cache] clearCache 失败,继续启动:', e && e.message)
+  }
+  try { fs.writeFileSync(CACHE_STAMP(), cur) } catch { /* 写不了戳就下次再清一遍,无害 */ }
+  return true
+}
+
 app.whenReady().then(async () => {
-  // Clear HTTP disk cache on every launch so production updates are always picked up immediately
-  await session.defaultSession.clearCache()
+  await clearCacheIfUpgraded()
 
   createWindow()
   app.on('activate', () => {
