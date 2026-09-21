@@ -4,17 +4,67 @@ const fs   = require('fs')
 
 nativeTheme.themeSource = 'dark'
 
-const BASE_URL  = 'https://app.lanwealth.com'
+// ── 线路候选:快车道优先,主域兜底 ─────────────────────────────────────────
+//
+// 2026-09-21 大陆裸线实测(同样 18 个静态资源 ≈1MB,两条路**交替**采样):
+//   fast(Cloudflare 橙云)   8.9 / 9.0 / 10.5 / 15.1 秒
+//   app (灰云直连 Vercel)   35.9 / 63.3 / 63.3 / 97.9 秒
+// 快 4~7 倍,而且抖动小得多。橙云还绕到了阿姆斯特丹(cf-ray …-AMS)——
+// 绕半个地球还快 4 倍,说明 Vercel 那条 sin1 路在大陆是真的差。
+//
+// ⚠️ **但不能只留橙云。** 09-10 在福建电信实测,同一个橙云开关是 **0/5 全死**,
+//    而灰云 6/6。这个开关**按 ISP 变**,失败模式是「完全打不开」而不是「变慢」。
+//    所以两条都留着、启动时探测谁通用谁 —— 让「该选哪条」这个问题不必回答。
+//
+// ⚠️ 换线 = 换 origin = **换 cookie 作用域**。Supabase 会话是 cookie 且没设 domain,
+//    所以换线之后用户要**重新登录一次**。因此探到的线路会记在 userData 优先复用,
+//    不要每次启动都重新挑。
+const BASES = [
+  'https://fast.lanwealth.com',   // Cloudflare 橙云:多数线路快 4~7 倍,个别 ISP 会整段阻断
+  'https://app.lanwealth.com',    // 灰云直连 Vercel 新段:慢,但实测过的线路上没断过
+]
+const ALLOWED_ORIGINS = new Set(BASES.map(b => new URL(b).origin))
+const FALLBACK_BASE   = BASES[BASES.length - 1]   // 全探不通时回落到它,让错误正常暴露
+
 // 企业版用户主用桌面端 → 加载完整工作台(对话/知识库/企业管理/图片/视频全功能),
 // 不再用阉割版独立聊天页;网页感元素(Home/Download/角标)由下方注入 CSS 隐藏。
-const CHAT_URL  = `${BASE_URL}/dashboard/chat`
+const chatUrl   = base => `${base}/dashboard/chat`
 const isMac     = process.platform === 'darwin'
 const isWin     = process.platform === 'win32'
-const APP_ORIGIN = new URL(BASE_URL).origin
 
 let mainWindow
+let currentBase = FALLBACK_BASE
 
-function createWindow() {
+// ── 线路探测与记忆 ──────────────────────────────────────────────────────────
+const BASE_STAMP = () => path.join(app.getPath('userData'), '.last-good-base')
+
+function rememberBase(b) {
+  try { fs.writeFileSync(BASE_STAMP(), b) } catch { /* 写不了下次重探,无害 */ }
+}
+
+// 探一条线:用 /api/app-config —— 轻量、免登录、可缓存。
+// ⚠️ **别用 /api/health**:服务端会外呼 Atlas/LiteLLM,又重又会把上游的毛病算到线路头上。
+// 被墙的表现是 RST/超时;**收到任何 HTTP 响应(哪怕 4xx/5xx)都算这条线通** ——
+// 我们判的是「网络到不到得了」,不是「服务健不健康」。
+async function probeBase(base, ms = 3500) {
+  try {
+    await fetch(`${base}/api/app-config`, { cache: 'no-store', signal: AbortSignal.timeout(ms) })
+    return true
+  } catch { return false }
+}
+
+async function pickBase() {
+  let last = null
+  try { last = fs.readFileSync(BASE_STAMP(), 'utf8').trim() } catch { /* 首次运行 */ }
+  const order = BASES.includes(last) ? [last, ...BASES.filter(b => b !== last)] : [...BASES]
+  for (const b of order) {
+    if (await probeBase(b)) { rememberBase(b); return b }
+  }
+  return FALLBACK_BASE
+}
+
+function createWindow(base = currentBase) {
+  currentBase = base
   mainWindow = new BrowserWindow({
     width:          960,
     height:         680,
@@ -38,7 +88,23 @@ function createWindow() {
 
   const defaultUserAgent = mainWindow.webContents.getUserAgent()
   const desktopUserAgent = `${defaultUserAgent} BayzeDesktop/${app.getVersion()}`
-  mainWindow.loadURL(CHAT_URL, { userAgent: desktopUserAgent })
+  mainWindow.loadURL(chatUrl(currentBase), { userAgent: desktopUserAgent })
+
+  // 线路在运行中挂了(网络层失败,不是 4xx/5xx)→ 换另一条重来一次。
+  // 只换一次:两条都不通时来回切只会让人看不懂,不如让错误页正常显示出来。
+  let switched = false
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, _url, isMainFrame) => {
+    if (!isMainFrame) return
+    if (code === -3) return                  // ERR_ABORTED = 正常导航打断,不是故障
+    if (switched) return
+    const other = BASES.find(b => b !== currentBase)
+    if (!other) return
+    switched = true
+    console.warn(`[route] ${currentBase} 加载失败(${code} ${desc}),换到 ${other}`)
+    currentBase = other
+    rememberBase(other)
+    mainWindow.loadURL(chatUrl(other), { userAgent: desktopUserAgent })
+  })
 
   // Inject native-feel CSS: minimal scrollbars, smooth fonts, no web-browser artifacts
   mainWindow.webContents.on('did-finish-load', () => {
@@ -78,7 +144,7 @@ function createWindow() {
   // Open external links in system browser, keep internal navigation inside the window
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     let internal = false
-    try { internal = new URL(url).origin === APP_ORIGIN } catch { /* invalid URL */ }
+    try { internal = ALLOWED_ORIGINS.has(new URL(url).origin) } catch { /* invalid URL */ }
     if (!internal) { shell.openExternal(url); return { action: 'deny' } }
     mainWindow.loadURL(url)
     return { action: 'deny' }
@@ -86,7 +152,7 @@ function createWindow() {
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
     let internal = false
-    try { internal = new URL(url).origin === APP_ORIGIN } catch { /* invalid URL */ }
+    try { internal = ALLOWED_ORIGINS.has(new URL(url).origin) } catch { /* invalid URL */ }
     if (!internal) { event.preventDefault(); shell.openExternal(url) }
   })
 
@@ -187,7 +253,7 @@ async function clearCacheIfUpgraded() {
 app.whenReady().then(async () => {
   await clearCacheIfUpgraded()
 
-  createWindow()
+  createWindow(await pickBase())
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
