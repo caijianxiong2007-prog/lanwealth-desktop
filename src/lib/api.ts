@@ -8,8 +8,8 @@ import { apiFetch } from './baseUrl'
 // claude-opus-4 在网关根本没有对应 model_name,选它会被静默降级到 DeepSeek。
 // 现清单与网页端 ChatClient.tsx MODELS 同源,price = 输入价/百万 token(与定价页一致)。
 export const MODELS = [
-  { id: 'deepseek-v4-flash',     name: 'DeepSeek V4 Flash',     tag: 'Fast',      price: '$0.34/M', group: 'DeepSeek'  },
-  { id: 'deepseek-v4-pro',       name: 'DeepSeek V4 Pro',       tag: 'Reasoning', price: '$0.69/M', group: 'DeepSeek'  },
+  { id: 'deepseek-v4-flash',     name: 'DeepSeek V4 Flash',     tag: 'Fast',      price: '$0.53/M', group: 'DeepSeek'  },
+  { id: 'deepseek-v4-pro',       name: 'DeepSeek V4 Pro',       tag: 'Reasoning', price: '$1.59/M', group: 'DeepSeek'  },
   { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite', tag: 'Fast',      price: '$0.38/M', group: 'Google'    },
   { id: 'gemini-3.6-flash',      name: 'Gemini 3.6 Flash',      tag: 'Advanced',  price: '$1.88/M', group: 'Google'    },
   { id: 'claude-haiku-4-5',      name: 'Claude Haiku 4.5',      tag: 'Fast',      price: '$1.25/M', group: 'Claude'    },
