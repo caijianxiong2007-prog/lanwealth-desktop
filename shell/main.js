@@ -5,6 +5,19 @@ const { EgressGate } = require('./egress-gate')
 
 nativeTheme.themeSource = 'dark'
 
+// 正式包里 --remote-debugging-port/--remote-debugging-pipe 照样生效(fuses 只关 node 的 --inspect),
+// 而这正是 scripts/egress-probe.mjs 用来在页面里读写 electronApp 的那条路。签名壳不能带着这扇门出货。
+if (app.isPackaged && ['remote-debugging-port', 'remote-debugging-pipe', 'inspect', 'inspect-brk'].some(sw => app.commandLine.hasSwitch(sw))) {
+  app.exit(1)
+}
+// ⚠️ 这里刻意**没有**任何"关 WebTransport / 关 WebRTC"的命令行开关。2026-09-23 对着本机自架的
+// WebTransport(aioquic)与 TURN 服务器逐个实测(Chromium 152,每项都先做阳性对照):
+//   --disable-blink-features=WebTransport / --disable-features=WebTransport / --disable-features=WebRTC
+//   → API 都还在、连接都成功;--disable-quic 关得掉普通 HTTP 的 QUIC(服务器从 24 行握手日志变 0 行),
+//   却关不掉 WebTransport(照样 READY 并回显);CSP "webrtc 'block'" 被报 Unrecognized directive。
+// 真正管用的只有网络层的代理配置(installNetworkAllowlist 的 PAC 黑洞)+ WebRTC 的 UDP 策略。
+// 别再往这里加开关:加了不生效的开关,只会让下一个人以为这条路已经封了。
+
 // ── 线路候选:快车道优先,主域兜底 ─────────────────────────────────────────
 //
 // 2026-09-21 大陆裸线实测(同样 18 个静态资源 ≈1MB,两条路**交替**采样):
@@ -25,6 +38,14 @@ const BASES = [
   'https://app.lanwealth.com',    // 灰云直连 Vercel 新段:慢,但实测过的线路上没断过
 ]
 const ALLOWED_ORIGINS = new Set(BASES.map(b => new URL(b).origin))
+// 网页端会从**渲染进程**直接连的第三方主机(不含服务端才连的);改这里前先看 installNetworkAllowlist 的说明。
+// 2026-09-23 对 tokenbridge 源码 + 线上 29 个 chunk 逐条定性的结果(证据到 file:line,记在 commit message):
+const EXTRA_ALLOWED_HOSTS = [
+  'umpwmtciqxthmyzpymhu.supabase.co',   // supabase-js 浏览器客户端:/auth/v1/*、Storage 直传(PUT 签名 URL)、图片/视频签名 URL(<img>/<video>)
+  'api.qrserver.com',                   // /download 页的二维码 <img>(壳里该页入口已隐藏,按 URL 仍可达;留着免得图裂)
+  // 不列:Stripe/Xendit/Google 登录都是顶层跳转 → will-navigate 外开系统浏览器;vercel.live 只在 Vercel 团队预览态注入;
+  //       其余 30 多个主机全是服务端 /api 路由才连的。Supabase 若日后开自定义域,这里要同步改。
+]
 const FALLBACK_BASE   = BASES[BASES.length - 1]   // 全探不通时回落到它,让错误正常暴露
 
 // 企业版用户主用桌面端 → 加载完整工作台(对话/知识库/企业管理/图片/视频全功能),
@@ -48,6 +69,11 @@ function safeOpenExternal(url) {
   let proto = ''
   try { proto = new URL(url).protocol } catch { return }
   if (!EXTERNAL_SCHEMES.has(proto)) return
+  // 外开的 URL 也是一条出域路:window.open('https://x/?q=' + 真值) 不经 webRequest,这里是唯一关口
+  if (gate.status().count > 0) {
+    const hit = gate.scanText(url)
+    if (hit) { notifyBlocked(hit, { url, method: 'EXTERNAL' }); return }
+  }
   shell.openExternal(url)
 }
 
@@ -64,17 +90,23 @@ function assertTrustedSender(event) {
 //
 // 主进程拦截 defaultSession 上的**每一个**出站请求(含发往自家 fast/app 源的),
 // 用渲染进程经 IPC 登记的密表真值做精确串匹配,命中即取消。扫描核心在 egress-gate.js。
-// 网页 JS 改成什么样都绕不过这一层 —— 它跑在签名壳里,不是从网上拉下来的。
+// 它跑在签名壳里,不是从网上拉下来的 —— 网页 JS 被改坏也绕不过 egress-gate.js 文件头**列出的形态**
+// (明文 / JSON、百分号、HTML、QP、base64、hex 变形 / gzip、deflate、brotli、zip、multipart 容器 / 请求头与 Cookie /
+// 外开 URL / 定宽编码);它守不住分片、语义改写和任意自定义编码,那三类写在同一处,别在这里许更多。
 //
 // 边界(别让下一个人误以为它做得更多):
 //  · 它不判断什么是敏感的,只守"已登记的真值"。登记什么、守什么。
 //  · webRequest 看不见 WebSocket 帧 → 只要密表非空,ws:/wss: 一律取消(App 本就不用 WS)。
+//  · webRequest 也看不见 WebRTC(TURN/TCP/TLS 中继、UDP)与 WebTransport(QUIC)——这两条不靠闸,靠
+//    installNetworkAllowlist 的 PAC 黑洞(外域主机一律指到不存在的代理 127.0.0.1:1,连 Worker 里的也一样)
+//    + WebRTC 的 disable_non_proxied_udp 策略(砍 UDP)。两者缺一不可,实测记录见 installNetworkAllowlist 与
+//    scripts/egress-probe.mjs 文件头。
 //  · 渲染进程自己设 content-encoding 压缩请求体 → 取消(壳解不开的体不能放行)。
 //  · 真值只在主进程内存,不落盘、不写日志、不发回渲染进程;被拦通知只带 label/kind/method/path。
 //  · 检查过程出任何异常 → 取消(fail-closed)。
 const gate = new EgressGate()
 let secretActive = false                       // 渲染进程告知:当前是否有保密会话打开(用于换线冻结)
-const MAX_SCAN_FILE = 32 * 1024 * 1024         // 上传文件超过此大小不读进内存,直接视为 opaque 命中
+const MAX_SCAN_FILE = 32 * 1024 * 1024         // 上传体(file / blob / bytes)超过此大小不读进内存,直接视为 opaque 命中
 
 function notifyBlocked(hit, details) {
   let pathname = '?'
@@ -102,12 +134,14 @@ function installEgressGate() {
         let buf
         if (part.blobUUID) {
           buf = await session.defaultSession.getBlobData(part.blobUUID)
+          if (buf.length > MAX_SCAN_FILE) return block({ label: '(超过 32MB 的上传体)', kind: 'opaque' })
         } else if (part.file) {
           const st = await fs.promises.stat(part.file)
           if (st.size > MAX_SCAN_FILE) return block({ label: '(超过 32MB 的上传文件)', kind: 'opaque' })
           buf = await fs.promises.readFile(part.file)
         } else if (part.bytes) {
           buf = part.bytes
+          if (buf.length > MAX_SCAN_FILE) return block({ label: '(超过 32MB 的上传体)', kind: 'opaque' })
         } else {
           // 既无 bytes 也无 file/blobUUID:Electron 44 实测 ReadableStream 体就长这样,壳读不到内容 → 拦
           return block({ label: '(无法读取的上传体)', kind: 'opaque' })
@@ -123,12 +157,64 @@ function installEgressGate() {
   })
 
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['<all_urls>'] }, (details, cb) => {
-    if (gate.status().count === 0) return cb({})
-    const selfEncoded = Object.keys(details.requestHeaders || {}).some(h => h.toLowerCase() === 'content-encoding')
-    if (!selfEncoded) return cb({})
-    notifyBlocked({ label: '(渲染进程自设 Content-Encoding)', kind: 'content-encoding' }, details)
-    cb({ cancel: true })
+    try {
+      if (gate.status().count === 0) return cb({})
+      const headers = details.requestHeaders || {}
+      const selfEncoded = Object.keys(headers).some(h => h.toLowerCase() === 'content-encoding')
+      if (selfEncoded) { notifyBlocked({ label: '(渲染进程自设 Content-Encoding)', kind: 'content-encoding' }, details); return cb({ cancel: true }) }
+      // 头也是出域载体:fetch(url, { headers: { 'x-note': 真值 } })、document.cookie = 真值 —— onBeforeRequest 看不到头,只有这里能拦
+      const hit = gate.scanHeaders(headers)
+      if (hit) { notifyBlocked(hit, details); return cb({ cancel: true }) }
+      cb({})
+    } catch (e) {
+      console.warn('[egress] 请求头检查异常,按拦截处理:', e && e.message)
+      cb({ cancel: true })
+    }
   })
+}
+
+// ── 网络白名单:PAC 黑洞 ─────────────────────────────────────────────────────
+//
+// 闸只看得见走 URLLoader 的请求。不走它的通道(WebRTC 的 TURN over TCP/TLS、WebTransport、DNS 预取/预连接)
+// 在网络层统一处理:自家源与网页端必需的第三方主机按**系统代理的决议**走(公司代理环境不能断),
+// 其余任何主机一律指到一个不存在的代理 127.0.0.1:1 —— TCP 连都连不上,连 DNS 都不会在本机解析。
+//
+// 2026-09-23 实测(Electron 44;本机自架 TURN 服务器与 aioquic WebTransport 服务器,每项先做阳性对照):
+//   · 只开 disable_non_proxied_udp:host/srflx/UDP-relay 归零,但 **TURN over TCP(3478)与 TLS(5349)照出 relay 候选**;
+//   · 只开 PAC 黑洞:TURN 服务器一次连接都收不到(701 Failed to establish connection,180ms),UDP 路不管;
+//   · 两者叠加:全部归零,自家源 fetch 仍 200;把 TURN 主机加进白名单候选立刻回来 —— 证明归零就是 PAC 造成的;
+//   · WebTransport:PAC 黑洞下 1ms 内 'Opening handshake failed',服务器连 QUIC ClientHello 都收不到,
+//     **blob Worker 里的 WebTransport 同样被挡**(网络层控制不分领域);而 --disable-quic 等开关全部无效。
+//   · CSP "webrtc 'block'" 被 Chromium 152 报 Unrecognized directive —— 是装饰,已删。
+//
+// 边界(如实写):Chromium 对 loopback(127.0.0.1 / localhost)有**先于 PAC** 的隐式直连规则,PAC 模式关不掉
+//   (proxyBypassRules '<-loopback>' 只在 fixed_servers 模式生效,而 fixed_servers 无法让白名单主机沿用系统代理)。
+//   于是本机上的监听进程仍可达 —— 那已经是"设备被入侵"的范畴(方案 §1 划为客户内控责任),不在这道闸的承诺里。
+//
+// ⚠️ 白名单是按**主机名**判的,与端口无关;漏掉网页端真的要连的主机 = 那个功能在桌面版静默坏掉,
+//    所以新增第三方主机时必须同步改 EXTRA_ALLOWED_HOSTS,并跑 npm run probe:egress。
+// ⚠️ 系统代理会变(用户开关 VPN / 公司 PAC):决议放在一个独立的 session 里做(它始终跟系统走),
+//    每次换线 / 重载前重新决议一遍再重写 PAC。
+const ALLOWED_HOSTS = new Set([
+  ...BASES.map(b => new URL(b).hostname),
+  // 网页端从浏览器直接连的第三方(见 tokenbridge 侧清单;此处只列真的从渲染进程发出的)
+  ...EXTRA_ALLOWED_HOSTS,
+])
+const BLACKHOLE = 'PROXY 127.0.0.1:1'
+
+async function installNetworkAllowlist() {
+  // 独立 session:不装 PAC,resolveProxy 永远给出系统代理对该 URL 的决议(DIRECT / PROXY host:port / PAC 结果)
+  const resolver = session.fromPartition('bayze-proxy-resolver')
+  const rules = []
+  for (const host of ALLOWED_HOSTS) {
+    let decision = 'DIRECT'
+    try { decision = (await resolver.resolveProxy(`https://${host}/`)) || 'DIRECT' } catch { /* 解析不了就直连 */ }
+    // 决议串只允许 PAC 语法字符,防止把奇怪的系统配置原样拼进脚本
+    if (!/^[A-Za-z0-9 .:;\[\]_-]+$/.test(decision)) decision = 'DIRECT'
+    rules.push(`if (h === ${JSON.stringify(host)}) return ${JSON.stringify(decision)};`)
+  }
+  const pac = `function FindProxyForURL(url, host) { var h = String(host).toLowerCase(); ${rules.join(' ')} return ${JSON.stringify(BLACKHOLE)}; }`
+  await session.defaultSession.setProxy({ mode: 'pac_script', pacScript: 'data:application/x-ns-proxy-autoconfig;base64,' + Buffer.from(pac).toString('base64') })
 }
 
 // 权限:只给自家源放行剪贴板两项,其余(摄像头/麦克风/通知/定位/全屏…)一律拒。
@@ -195,9 +281,18 @@ function createWindow(base = currentBase) {
     },
   })
 
+  // WebRTC:砍掉所有非代理 UDP 路(host/srflx/UDP relay 全归零);TCP/TLS 中继由 PAC 黑洞管。必须在第一次 loadURL 之前。
+  mainWindow.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp')
+
   const defaultUserAgent = mainWindow.webContents.getUserAgent()
   const desktopUserAgent = `${defaultUserAgent} BayzeDesktop/${app.getVersion()}`
   mainWindow.loadURL(chatUrl(currentBase), { userAgent: desktopUserAgent })
+
+  // 主帧真正换页(reload / 换线 / 登出跳转)后,渲染进程那份 secretActive 状态已随页面消失,
+  // 主进程也跟着归零;不然之后任何一次线路故障都会弹「当前有保密会话打开」的假警。
+  mainWindow.webContents.on('did-start-navigation', (d) => {
+    if (d && d.isMainFrame && !d.isSameDocument) secretActive = false
+  })
 
   // 线路在运行中挂了(网络层失败,不是 4xx/5xx)→ 换另一条重来一次。
   // 只换一次:两条都不通时来回切只会让人看不懂,不如让错误页正常显示出来。
@@ -229,6 +324,8 @@ function createWindow(base = currentBase) {
     }
     switched = true
     console.warn(`[route] ${currentBase} 加载失败(${code} ${desc}),换到 ${other}`)
+    // 加载失败可能就是系统代理变了(开关 VPN):换线前按当前系统代理重写一遍白名单 PAC
+    try { await installNetworkAllowlist() } catch (e) { console.warn('[net] 白名单 PAC 重写失败:', e && e.message) }
     currentBase = other
     rememberBase(other)
     mainWindow.loadURL(chatUrl(other), { userAgent: desktopUserAgent })
@@ -281,8 +378,11 @@ function createWindow(base = currentBase) {
   })
 
   // 服务端 302 到外域也走同一套判定:窗口只能停在自家两个源上。
-  mainWindow.webContents.on('will-redirect', (event, url) => {
-    if (!isAllowedOrigin(url)) { event.preventDefault(); safeOpenExternal(url) }
+  // ⚠️ will-navigate 本就只对主帧发,will-redirect 含子帧 —— 这里显式只管主帧,
+  //    否则 iframe 里一次 302 会把那个 iframe 干掉并把外域 URL 甩到系统浏览器。
+  mainWindow.webContents.on('will-redirect', (details) => {
+    if (!details.isMainFrame) return
+    if (!isAllowedOrigin(details.url)) { details.preventDefault(); safeOpenExternal(details.url) }
   })
 
   buildMenu()
@@ -381,6 +481,7 @@ async function clearCacheIfUpgraded() {
 
 app.whenReady().then(async () => {
   installEgressGate()          // 先装闸再开窗:窗口的第一个请求就已经在闸后面
+  await installNetworkAllowlist()   // 同理:PAC 黑洞先于第一个请求
   installPermissionPolicy()
   await clearCacheIfUpgraded()
 
@@ -399,6 +500,8 @@ app.on('window-all-closed', () => {
 ipcMain.handle('secret:register', (e, items) => { assertTrustedSender(e); return gate.register(items) })
 ipcMain.handle('secret:status',   (e) => { assertTrustedSender(e); return gate.status() })
 ipcMain.handle('secret:active',   (e, b) => { assertTrustedSender(e); secretActive = !!b; return secretActive })
+// 登出 / 换账号时清空:密表按用户隔离在渲染进程,主进程这份登记也不能跨用户存活
+ipcMain.handle('secret:clear',    (e) => { assertTrustedSender(e); gate.clear(); secretActive = false; return gate.status() })
 
 // ── IPC: 知识库原件本地留底(「仅本地」档,v1.2.0)────────────────────────────
 // 原件存 userData/knowledge-sources/{docId}/{文件名};检索索引在云端,原件只留本机。

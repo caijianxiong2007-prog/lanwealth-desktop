@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('electronApp', {
     status:    ()      => ipcRenderer.invoke('secret:status'),
     // 有保密会话打开时置 true:线路故障时壳不自动换线(换源会让密表暂时不可见),改为询问
     setActive: (b)     => ipcRenderer.invoke('secret:active', !!b),
+    // 登出 / 换账号时调用:清空主进程里的登记(密表按用户隔离,登记也不能跨用户存活)
+    clear:     ()      => ipcRenderer.invoke('secret:clear'),
     // 被拦通知;返回取消订阅函数
     onBlocked: (cb) => {
       const handler = (_e, info) => { try { cb(info) } catch { /* 页面回调出错不影响桥 */ } }
