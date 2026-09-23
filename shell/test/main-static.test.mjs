@@ -314,6 +314,16 @@ test('WebTransport / WebRTC:不靠任何命令行开关(2026-09-23 实测全部�
   assert.ok(mainCode.includes('async function installNetworkAllowlist('), '封这两条通道的是 PAC 黑洞')
 })
 
+test('网络白名单装不上不能让窗口不开:whenReady 里 try/catch,status 如实返回 active=allowlistInstalled', () => {
+  const ready = between(mainCode, 'app.whenReady().then(', "app.on('window-all-closed'")
+  assert.match(ready, /try \{\s*await installNetworkAllowlist\(\)[\s\S]{0,200}?\} catch \(e\) \{[\s\S]{0,200}?allowlistInstalled = false/, 'installNetworkAllowlist 的异常没接住 → whenReady 拒绝 → 窗口永远不开')
+  assert.ok(ready.includes('if (!allowlistInstalled && mainWindow)'), '降级要告诉用户')
+  const f = between(mainCode, 'async function installNetworkAllowlist(', 'function installPermissionPolicy(')
+  assert.match(f, /setProxy\([\s\S]*?\)\s*\n\s*allowlistInstalled = true/, 'setProxy 成功后才置 true')
+  assert.match(mainCode, /ipcMain\.handle\('secret:status',[^\n]*active: allowlistInstalled/, 'secret:status 要如实报 PAC 状态,不能让网页在降级时亮 🛡')
+  assert.match(mainCode, /ipcMain\.handle\('secret:clear',[^\n]*active: allowlistInstalled/, 'secret:clear 同理')
+})
+
 test('网络白名单:EXTRA_ALLOWED_HOSTS 含 Supabase 主机(登录 / 存储直传 / 媒体签名 URL 都从浏览器直连它)', () => {
   const list = between(mainCode, 'const EXTRA_ALLOWED_HOSTS = [', ']')
   assert.ok(list.includes("'umpwmtciqxthmyzpymhu.supabase.co'"), '缺 Supabase 主机 = 桌面版登录都登不上')

@@ -201,6 +201,9 @@ const ALLOWED_HOSTS = new Set([
   ...EXTRA_ALLOWED_HOSTS,
 ])
 const BLACKHOLE = 'PROXY 127.0.0.1:1'
+// PAC 装好没。没装好 = 旁路通道没封,壳级闸只算**降级**:窗口照开(不能让一个代理配置错误把整个 App 变成打不开),
+// 但 secret:status 会如实返回 active:false,网页端就不会亮 🛡 —— 不装作有第二道。
+let allowlistInstalled = false
 
 async function installNetworkAllowlist() {
   // 独立 session:不装 PAC,resolveProxy 永远给出系统代理对该 URL 的决议(DIRECT / PROXY host:port / PAC 结果)
@@ -215,6 +218,7 @@ async function installNetworkAllowlist() {
   }
   const pac = `function FindProxyForURL(url, host) { var h = String(host).toLowerCase(); ${rules.join(' ')} return ${JSON.stringify(BLACKHOLE)}; }`
   await session.defaultSession.setProxy({ mode: 'pac_script', pacScript: 'data:application/x-ns-proxy-autoconfig;base64,' + Buffer.from(pac).toString('base64') })
+  allowlistInstalled = true
 }
 
 // 权限:只给自家源放行剪贴板两项,其余(摄像头/麦克风/通知/定位/全屏…)一律拒。
@@ -481,11 +485,25 @@ async function clearCacheIfUpgraded() {
 
 app.whenReady().then(async () => {
   installEgressGate()          // 先装闸再开窗:窗口的第一个请求就已经在闸后面
-  await installNetworkAllowlist()   // 同理:PAC 黑洞先于第一个请求
+  try {
+    await installNetworkAllowlist()   // 同理:PAC 黑洞先于第一个请求
+  } catch (e) {
+    // 这里若不接住,whenReady 的 promise 会整个拒绝 → 窗口永远不开、App 看起来"死了"。降级开窗,状态如实上报。
+    allowlistInstalled = false
+    console.warn('[net] 白名单 PAC 安装失败,旁路通道未封(壳级闸降级):', e && e.message)
+  }
   installPermissionPolicy()
   await clearCacheIfUpgraded()
 
   createWindow(await pickBase())
+  if (!allowlistInstalled && mainWindow) {
+    dialog.showMessageBox(mainWindow, {
+      type: 'warning', title: '壳级出域闸降级',
+      message: '网络白名单未能安装',
+      detail: '桌面版仍可正常使用,但保密撰写的壳级第二道闸处于降级状态(旁路通道未封)。重启 App 通常可恢复;若反复出现请联系我们。',
+      buttons: ['知道了'],
+    }).catch(() => undefined)
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -498,10 +516,10 @@ app.on('window-all-closed', () => {
 // ── IPC: 出域闸登记 ────────────────────────────────────────────────────────
 // 渲染进程装入密表时把真值登记进来;真值只进 gate 内存,不回传、不落盘。
 ipcMain.handle('secret:register', (e, items) => { assertTrustedSender(e); return gate.register(items) })
-ipcMain.handle('secret:status',   (e) => { assertTrustedSender(e); return gate.status() })
+ipcMain.handle('secret:status',   (e) => { assertTrustedSender(e); return { ...gate.status(), active: allowlistInstalled } })
 ipcMain.handle('secret:active',   (e, b) => { assertTrustedSender(e); secretActive = !!b; return secretActive })
 // 登出 / 换账号时清空:密表按用户隔离在渲染进程,主进程这份登记也不能跨用户存活
-ipcMain.handle('secret:clear',    (e) => { assertTrustedSender(e); gate.clear(); secretActive = false; return gate.status() })
+ipcMain.handle('secret:clear',    (e) => { assertTrustedSender(e); gate.clear(); secretActive = false; return { ...gate.status(), active: allowlistInstalled } })
 
 // ── IPC: 知识库原件本地留底(「仅本地」档,v1.2.0)────────────────────────────
 // 原件存 userData/knowledge-sources/{docId}/{文件名};检索索引在云端,原件只留本机。
