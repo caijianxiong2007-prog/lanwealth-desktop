@@ -13,7 +13,7 @@ export const MODELS = [
   { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite', tag: 'Fast',      price: '$0.38/M', group: 'Google'    },
   { id: 'gemini-3.6-flash',      name: 'Gemini 3.6 Flash',      tag: 'Advanced',  price: '$1.88/M', group: 'Google'    },
   { id: 'claude-haiku-4-5',      name: 'Claude Haiku 4.5',      tag: 'Fast',      price: '$1.25/M', group: 'Claude'    },
-  { id: 'claude-sonnet-5',       name: 'Claude Sonnet 5',       tag: 'Balanced',  price: '$3.75/M', group: 'Claude'    },
+  { id: 'claude-sonnet-5',       name: 'Claude Sonnet 5',       tag: 'Balanced',  price: '$2.50/M', group: 'Claude'    },
   { id: 'claude-opus-5',         name: 'Claude Opus 5',         tag: 'Powerful',  price: '$6.25/M', group: 'Claude'    },
   { id: 'gpt-5.4-mini',          name: 'GPT-5.4 mini',          tag: 'Fast',      price: '$0.94/M', group: 'OpenAI'    },
   { id: 'gpt-5.6-terra',         name: 'GPT-5.6 Terra',         tag: 'Balanced',  price: '$3.13/M', group: 'OpenAI'    },
