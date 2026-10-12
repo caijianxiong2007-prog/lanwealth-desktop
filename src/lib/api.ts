@@ -16,7 +16,7 @@ export const MODELS = [
   { id: 'claude-sonnet-5',       name: 'Claude Sonnet 5',       tag: 'Balanced',  price: '$2.50/M', group: 'Claude'    },
   { id: 'claude-opus-5',         name: 'Claude Opus 5',         tag: 'Powerful',  price: '$6.25/M', group: 'Claude'    },
   { id: 'gpt-5.4-mini',          name: 'GPT-5.4 mini',          tag: 'Fast',      price: '$0.94/M', group: 'OpenAI'    },
-  { id: 'gpt-5.6-terra',         name: 'GPT-5.6 Terra',         tag: 'Balanced',  price: '$3.13/M', group: 'OpenAI'    },
+  { id: 'gpt-5.6-terra',         name: 'GPT-5.6 Terra',         tag: 'Balanced',  price: '$2.50/M', group: 'OpenAI'    },
   { id: 'gpt-5.6-sol',           name: 'GPT-5.6 Sol',           tag: 'Powerful',  price: '$6.25/M', group: 'OpenAI'    },
   { id: 'qwen3.5-flash',         name: 'Qwen3.5 Flash',         tag: 'Fast',      price: '$0.13/M', group: 'Qwen'      },
   { id: 'qwen-plus',             name: 'Qwen Plus',             tag: 'Balanced',  price: '$0.50/M', group: 'Qwen'      },
