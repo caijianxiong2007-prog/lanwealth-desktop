@@ -1,6 +1,7 @@
 import { resolve }               from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react                     from '@vitejs/plugin-react'
+import { INTERNATIONAL_APP_ORIGIN, normalizeInternationalBase } from './src/lib/internationalOrigin'
 
 // 构建期常量:优先读环境变量,缺省回落到生产默认值(保证现有 npm run build / package:* 无需
 // 额外配置即可打包)。anon key 本就是设计给客户端公开嵌入的(RLS 保护数据),非服务端密钥;
@@ -8,10 +9,11 @@ import react                     from '@vitejs/plugin-react'
 // SUPABASE_ANON_KEY / APP_URL 后再 build 即可。
 const SUPABASE_URL      = process.env.SUPABASE_URL      ?? 'https://umpwmtciqxthmyzpymhu.supabase.co'
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY ?? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVtcHdtdGNpcXh0aG15enB5bWh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMTQ1NDgsImV4cCI6MjA5Mjg5MDU0OH0.3CuAaxPOdfmt-NarK5v8wc5L6f57NY1jO9_CnrU5d_Q'
-const APP_URL           = process.env.APP_URL           ?? 'https://app.lanwealth.com'
+const APP_URL = normalizeInternationalBase(process.env.APP_URL) ?? INTERNATIONAL_APP_ORIGIN
 // 备用域(域名容灾):逗号分隔,如 'https://app.bayzeai.com'。注册好备用域后打包时导出
 // BACKUP_APP_URLS 即可点亮;缺省为空 = 行为与单域完全一致。见 src/lib/baseUrl.ts。
-const BACKUP_APP_URLS   = process.env.BACKUP_APP_URLS   ?? ''
+const BACKUP_APP_URLS = (process.env.BACKUP_APP_URLS ?? '').split(',')
+  .map(normalizeInternationalBase).filter((u): u is string => !!u).join(',')
 // CSP connect-src 白名单 = 主域 + 备用域 + Supabase(index.html 的 %API_CONNECT_SRC% 占位符)
 const CONNECT_SRC = [APP_URL, ...BACKUP_APP_URLS.split(',')]
   .map(s => s.trim()).filter(Boolean).concat(SUPABASE_URL).join(' ')

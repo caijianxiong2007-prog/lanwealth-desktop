@@ -2,10 +2,12 @@
 // 候选 = 构建期常量(APP_URL + BACKUP_APP_URLS 逗号分隔,均由 electron.vite.config.ts define 注入);
 // localStorage 记住上次可用域,下次启动优先用,避免每次冷启动都探测。
 
-const CANDIDATES = [
-  import.meta.env.APP_URL,
+import { INTERNATIONAL_APP_ORIGIN, normalizeInternationalBase } from './internationalOrigin'
+
+const CANDIDATES = [...new Set([
+  normalizeInternationalBase(import.meta.env.APP_URL) ?? INTERNATIONAL_APP_ORIGIN,
   ...(import.meta.env.BACKUP_APP_URLS || '').split(','),
-].map(u => u?.trim().replace(/\/+$/, '')).filter(Boolean) as string[]
+].map(normalizeInternationalBase).filter((u): u is string => !!u))]
 
 const LS_KEY = 'last_good_base'
 const bad = new Set<string>()          // 本次会话内已确认网络层失败的域
