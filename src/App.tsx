@@ -4,10 +4,11 @@ import type { UserSession }     from './lib/supabase'
 import LoginPage                from './pages/LoginPage'
 import ChatPage                 from './pages/ChatPage'
 import KnowledgePage            from './pages/KnowledgePage'
+import WorkPage                 from './pages/WorkPage'
 
 export default function App() {
   const [session, setSession] = useState<UserSession | null | undefined>(undefined)
-  const [page, setPage]       = useState<'chat' | 'knowledge'>('chat')
+  const [page, setPage]       = useState<'chat' | 'knowledge' | 'work'>('chat')
 
   useEffect(() => {
     getSession().then(s => setSession(s))
@@ -31,7 +32,8 @@ export default function App() {
   )
 
   if (!session) return <LoginPage onSuccess={s => setSession(s)} />
+  if (page === 'work') return <WorkPage session={session} onBack={() => setPage('chat')} />
   return page === 'knowledge'
     ? <KnowledgePage session={session} onBack={() => setPage('chat')} />
-    : <ChatPage session={session} onSignOut={() => setSession(null)} onOpenKnowledge={() => setPage('knowledge')} />
+    : <ChatPage session={session} onSignOut={() => setSession(null)} onOpenKnowledge={() => setPage('knowledge')} onOpenWork={() => setPage('work')} />
 }

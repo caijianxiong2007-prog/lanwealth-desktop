@@ -72,9 +72,9 @@ function renderContent(text: string, copyLabel: string, copiedLabel: string): Re
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
-interface Props { session: UserSession; onSignOut: () => void; onOpenKnowledge?: () => void }
+interface Props { session: UserSession; onSignOut: () => void; onOpenKnowledge?: () => void; onOpenWork?: () => void }
 
-export default function ChatPage({ session, onSignOut, onOpenKnowledge }: Props) {
+export default function ChatPage({ session, onSignOut, onOpenKnowledge, onOpenWork }: Props) {
   const [locale,    setLocale]    = useState<Locale>('en')
   const [convs,     setConvs]     = useState<Conversation[]>([])
   const [activeId,  setActiveId]  = useState<string|null>(null)
@@ -237,6 +237,13 @@ export default function ChatPage({ session, onSignOut, onOpenKnowledge }: Props)
                         </button>
                       ))}
                     </div>
+                    {onOpenWork && (
+                      <button onClick={()=>{setShowMenu(false);onOpenWork()}}
+                        style={{width:'100%',textAlign:'left',padding:'7px 12px',background:'none',border:'none',color:'var(--teal)',fontSize:12,cursor:'pointer'}}
+                        onMouseEnter={e=>{(e.target as any).style.background='var(--bg4)'}} onMouseLeave={e=>{(e.target as any).style.background='none'}}>
+                        🗂 {locale==='zh'?'工作记录':'Work Records'}
+                      </button>
+                    )}
                     {onOpenKnowledge && (
                       <button onClick={()=>{setShowMenu(false);onOpenKnowledge()}}
                         style={{width:'100%',textAlign:'left',padding:'7px 12px',background:'none',border:'none',color:'var(--muted)',fontSize:12,cursor:'pointer'}}
